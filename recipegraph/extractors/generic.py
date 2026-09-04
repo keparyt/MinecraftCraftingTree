@@ -40,11 +40,7 @@ def _ingredient(value: object, amount: float = 1.0) -> Ingredient:
             return Ingredient(kind="tag", tag_id=value[1:], amount=amount)
         return Ingredient(kind="item", item_id=value, amount=amount)
     if isinstance(value, list):
-        return Ingredient(
-            kind="alternatives",
-            amount=amount,
-            alternatives=[_ingredient(v) for v in value],
-        )
+        return Ingredient(kind="alternatives", amount=amount, alternatives=[_ingredient(v) for v in value])
     if isinstance(value, dict):
         count = float(value.get("count", value.get("amount", amount)))
         if "tag" in value:
@@ -54,7 +50,12 @@ def _ingredient(value: object, amount: float = 1.0) -> Ingredient:
         if "fluid" in value:
             return Ingredient(kind="fluid", item_id=str(value["fluid"]), amount=count, data=value)
         if "items" in value and isinstance(value["items"], list):
-            return Ingredient(kind="alternatives", amount=count, alternatives=[_ingredient(v) for v in value["items"]], data=value)
+            return Ingredient(
+                kind="alternatives",
+                amount=count,
+                alternatives=[_ingredient(v) for v in value["items"]],
+                data=value,
+            )
     return Ingredient(kind="unknown", amount=amount, data={"raw": value})
 
 
@@ -87,12 +88,12 @@ def recipe_id_from_source(source: SourceRecord) -> str:
     normalized = logical.replace("\\", "/")
     if normalized.startswith("data/"):
         normalized = normalized[5:]
-    if "/recipe/" in normalized:
-        namespace, rest = normalized.split("/recipe/", 1)
-        return f"{namespace}:{rest[:-5] if rest.endswith('.json') else rest}"
-    if "/recipes/" in normalized:
-        namespace, rest = normalized.split("/recipes/", 1)
-        return f"{namespace}:{rest[:-5] if rest.endswith('.json') else rest}"
+    for marker in ("/recipe/", "/recipes/"):
+        if marker in normalized:
+            namespace, rest = normalized.split(marker, 1)
+            if rest.endswith(".json"):
+                rest = rest[:-5]
+            return f"{namespace}:{rest}"
     return normalized
 
 
@@ -160,6 +161,12 @@ def extract_recipe(source: SourceRecord) -> Recipe:
                 recipe.inputs.append(_ingredient(raw[field]))
         if "result" in raw:
             recipe.outputs.append(_output(raw["result"]))
+        elif recipe_type == "minecraft:smithing_trim":
+            # The resulting item is derived from the base plus the trim template;
+            # the JSON does not identify one fixed output registry ID.
+            recipe.outputs.append(RecipeOutput(kind="unknown", data={"dynamic_output": "smithing_trim"}))
+            recipe.warnings.append("Smithing trim has a dynamic output; no fixed item ID was fabricated")
+            recipe.confidence = 0.8
         recipe.requirements.append({"kind": "smithing_slot_order", "fields": ["base", "template", "addition"]})
 
     if not recipe.outputs:
