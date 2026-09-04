@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from recipegraph.models import Recipe, SourceRecord
-from recipegraph.extractors.registry import ExtractorContext
+
+if TYPE_CHECKING:
+    from recipegraph.extractors.registry import ExtractorContext
 
 
 class RecipeExtractor(Protocol):
