@@ -1,0 +1,19 @@
+[project]
+name = "minecraft-crafting-tree"
+version = "0.1.0"
+description = "Deterministic Minecraft modpack recipe and production graph extractor"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+recipegraph = "recipegraph.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

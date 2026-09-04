@@ -1,0 +1,18 @@
+# Runtime output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Local database / reports
+*.db
+*.sqlite
+*.sqlite3
+scan_report.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
