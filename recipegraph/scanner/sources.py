@@ -17,7 +17,11 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _iter_zip_data(path: Path, mod_id: str | None) -> list[SourceRecord]:
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _iter_zip_data(path: Path, source_type: str, mod_id: str | None) -> list[SourceRecord]:
     records: list[SourceRecord] = []
     try:
         with ZipFile(path) as archive:
@@ -32,7 +36,7 @@ def _iter_zip_data(path: Path, mod_id: str | None) -> list[SourceRecord]:
                     continue
                 records.append(
                     SourceRecord(
-                        source_type="mod_jar",
+                        source_type=source_type,
                         location=f"{path}!/{normalized}",
                         display_name=path.name,
                         sha256=_sha256_bytes(archive.read(name)),
@@ -45,41 +49,57 @@ def _iter_zip_data(path: Path, mod_id: str | None) -> list[SourceRecord]:
     return records
 
 
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _add_directory_source(records: list[SourceRecord], base: Path, source_type: str) -> None:
+    if not base.is_dir():
+        return
+    for path in sorted(base.rglob("*")):
+        if not path.is_file() or path.suffix.lower() != ".json":
+            continue
+        logical = path.relative_to(base).as_posix()
+        lower = logical.lower()
+        if "/recipe/" not in f"/{lower}" and "/recipes/" not in f"/{lower}" and "/tags/" not in f"/{lower}":
+            continue
+        records.append(
+            SourceRecord(
+                source_type=source_type,
+                location=str(path),
+                display_name=base.name,
+                sha256=_sha256_file(path),
+                logical_path=logical,
+            )
+        )
+
+
+def _add_zip_packs(records: list[SourceRecord], base: Path, source_type: str) -> None:
+    if not base.is_dir():
+        return
+    for path in sorted(base.glob("*.zip")):
+        records.extend(_iter_zip_data(path, source_type, None))
 
 
 def discover_sources(root: Path, mods: list[ModInfo]) -> list[SourceRecord]:
-    sources: list[SourceRecord] = []
+    records: list[SourceRecord] = []
     mod_by_name = {m.file_name: m for m in mods if m.file_name}
 
     mods_dir = root / "mods"
     if mods_dir.is_dir():
         for jar in sorted(mods_dir.glob("*.jar")):
             mod = mod_by_name.get(jar.name)
-            sources.extend(_iter_zip_data(jar, mod.mod_id if mod else None))
+            records.extend(_iter_zip_data(jar, "mod_jar", mod.mod_id if mod else None))
 
-    # External datapacks/resources are discovered without changing the instance.
-    for base_name in ("datapacks", "resourcepacks"):
-        base = root / base_name
-        if not base.is_dir():
-            continue
-        for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in {".json", ".mcmeta", ".js", ".zs"}:
-                continue
-            logical = path.relative_to(base).as_posix()
-            lower = logical.lower()
-            if "/recipe/" not in f"/{lower}" and "/recipes/" not in f"/{lower}" and "/tags/" not in f"/{lower}":
-                continue
-            sources.append(
-                SourceRecord(
-                    source_type="datapack" if base_name == "datapacks" else "resourcepack",
-                    location=str(path),
-                    display_name=base_name,
-                    sha256=_sha256_file(path),
-                    logical_path=logical,
-                )
-            )
+    # Server datapacks can be installed globally or per world, and may be directories or ZIPs.
+    datapack_roots = [root / "datapacks"]
+    saves = root / "saves"
+    if saves.is_dir():
+        datapack_roots.extend(path for path in sorted(saves.glob("*/datapacks")) if path.is_dir())
+    for base in datapack_roots:
+        _add_directory_source(records, base, "datapack")
+        _add_zip_packs(records, base, "datapack")
+
+    # Resourcepacks are included as source evidence but are not assumed to be server recipe sources.
+    resourcepacks = root / "resourcepacks"
+    _add_directory_source(records, resourcepacks, "resourcepack")
+    _add_zip_packs(records, resourcepacks, "resourcepack")
 
     for script_root in (root / "kubejs", root / "scripts"):
         if not script_root.is_dir():
@@ -87,7 +107,7 @@ def discover_sources(root: Path, mods: list[ModInfo]) -> list[SourceRecord]:
         source_type = "kubejs" if script_root.name.lower() == "kubejs" else "script"
         for path in sorted(script_root.rglob("*")):
             if path.is_file() and path.suffix.lower() in {".js", ".mjs", ".zs", ".kts"}:
-                sources.append(
+                records.append(
                     SourceRecord(
                         source_type=source_type,
                         location=str(path),
@@ -97,4 +117,4 @@ def discover_sources(root: Path, mods: list[ModInfo]) -> list[SourceRecord]:
                     )
                 )
 
-    return sources
+    return records
